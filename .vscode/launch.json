@@ -1,0 +1,32 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch and Debug Blazor WebAssembly",
+            "type": "blazorwasm",
+            "request": "launch",
+            "url": "https://localhost:7153",
+            "webRoot": "${workspaceFolder}/inventario/wwwroot"
+        },
+        {
+            "name": "Launch and Debug Blazor Server",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/inventario/bin/Debug/net9.0/Inventario.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/inventario",
+            "stopAtEntry": false,
+            "serverReadyAction": {
+                "action": "openExternally",
+                "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+            },
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            },
+            "sourceFileMap": {
+                "/Views": "${workspaceFolder}/inventario/Views"
+            }
+        }
+    ]
+}

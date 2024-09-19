@@ -1,0 +1,241 @@
+﻿@page "/inventario"
+@rendermode InteractiveAuto
+@inject HttpClient Http
+@using System.Text.RegularExpressions;
+@using System.Security.Cryptography
+@using System.Text
+
+
+<h3>Inventario de Jochefin</h3>
+
+<!-- Filters Section (Top) -->
+<div class="filters">
+    <label>Filter by Name:</label>
+    <input type="text" @bind="filterTerm" placeholder="Enter name..." class="filter-input" />
+
+    <label>Category:</label>
+    <select @bind="selectedCategory" class="filter-select">
+        <option value="">All</option>
+        @foreach (var category in categories)
+        {
+            <option value="@category">@category</option>
+        }
+    </select>
+
+    <label>Level Range:</label>
+    <input type="number" @bind="minLevel" placeholder="Min Level" class="filter-input" />
+    <input type="number" @bind="maxLevel" placeholder="Max Level" class="filter-input" />
+</div>
+
+<div class="layout">
+    <!-- Inventory List (Left) -->
+    <div class="inventory-list">
+        @foreach (var item in FilteredItems)
+        {
+            <div class="inventory-item" @onclick="() => SelectItem(item)">
+                <strong>@item.Name</strong><br />
+                Level: @item.Level
+            </div>
+        }
+    </div>
+
+    <!-- Item Details (Right) -->
+    <div class="item-details">
+        @if (selectedItem != null)
+        {
+            <div class="details-box">
+                <pre>@selectedItem.FullDescription</pre> <!-- Preserving the original paragraph -->
+            </div>
+        }
+        else
+        {
+            <p>Select an item from the list to see its details.</p>
+        }
+    </div>
+</div>
+
+@code {
+    private string filterTerm = "";
+    private string selectedCategory = "";
+    private int? minLevel;
+    private int? maxLevel;
+    private List<InventoryItem> items = new List<InventoryItem>();
+    private List<string> categories = new List<string>();
+    private InventoryItem selectedItem;
+
+    // Filtered items based on filter criteria
+    private IEnumerable<InventoryItem> FilteredItems => items
+        .Where(i => (string.IsNullOrEmpty(filterTerm) || i.Name.Contains(filterTerm, StringComparison.OrdinalIgnoreCase)) &&
+                    (string.IsNullOrEmpty(selectedCategory) || i.Category == selectedCategory) &&
+                    (!minLevel.HasValue || i.Level >= minLevel) &&
+                    (!maxLevel.HasValue || i.Level <= maxLevel));
+
+    // On initialization, load the inventory data
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadInventory();
+    }
+
+    // Load inventory data from the Google Drive URL
+    private async Task LoadInventory()
+    {
+        try
+        {
+            // Fetch the data from Google Drive
+            var data = await Http.GetStringAsync("api/proxy/google-drive");
+
+            // Parse the data
+            items = ParseItems(data);
+
+            // Initialize categories based on the parsed data
+            categories = items.Select(i => i.Category).Distinct().ToList();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error loading inventory: " + ex.Message);
+        }
+
+        StateHasChanged(); // Ensure UI updates after loading data
+    }
+
+    // Parse the inventory data from plain text
+    private List<InventoryItem> ParseItems(string data)
+    {
+        var itemList = new List<InventoryItem>();
+        var category = string.Empty;
+        var lines = data.Split("\n\r", StringSplitOptions.RemoveEmptyEntries);
+        var currentParagraph = new List<string>();
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("--------------------"))
+            {
+                category = line.Replace("-", "").Trim();
+                continue;
+            }
+
+            if (line.StartsWith("\nEl objeto"))
+            {
+                 string namePattern = @"'(?<name>[^']*)'";
+                string typePattern = @"es del tipo (?<type>\w+)";
+                string flagsPattern = @"extra flags (?<flags>[^\.]+)";
+                string weightPattern = @"Su peso es de (?<weight>\d+)";
+                string valuePattern = @"su valor (?<value>\d+)";
+                string levelPattern = @"su nivel (?<level>\d+)";
+
+                // Extract information using regex
+                string name = ExtractInfo(line, namePattern, "name");
+                string type = ExtractInfo(line, typePattern, "type");
+                string flags = ExtractInfo(line, flagsPattern, "flags");
+                string weight = ExtractInfo(line, weightPattern, "weight");
+                string _value = ExtractInfo(line, valuePattern, "value");
+                string _level = ExtractInfo(line, levelPattern, "level");
+
+                var extraFlags = flags;
+                var value = int.Parse(_value);
+                var level = int.Parse(_level); 
+                var location = line.Contains("(") ? line.Trim('(', ')') : string.Empty;
+                var subtype = type == "weapon" ? GetWeaponSubtype(line) : null;
+                var damageFlags = type == "weapon" ? GetDamageFlags(line) : null;
+
+                itemList.Add(new InventoryItem
+                {
+                    Name = name,
+                    Type = type,
+                    ExtraFlags = extraFlags,
+                    Weight = int.Parse(weight),
+                    Value = value,
+                    Level = level,
+                    Category = category,
+                    Location = location,
+                    Subtype = subtype,
+                    DamageFlags = damageFlags,
+                    FullDescription = line // Preserve the original paragraph
+                });
+            }
+        }
+        itemList.Sort();
+
+        return itemList;
+    }
+
+    static string ExtractInfo(string text, string pattern, string groupName)
+    {
+        Regex regex = new Regex(pattern);
+        Match match = regex.Match(text);
+        if (match.Success)
+        {
+            return match.Groups[groupName].Value;
+        }
+        return groupName.Equals("level") ? "0" : "Not found";
+    }
+
+    // Helper to parse weapon subtype
+    private string GetWeaponSubtype(string line) => line.Contains("arma es del tipo")? line.Split("arma es del tipo ")[1]?.Trim('.') : "nada";
+
+    // Helper to parse damage flags
+    private string GetDamageFlags(string line) => line.Contains("Flags de armas:")? line.Split("Flags de armas: ")[1]?.Trim() : "nada";
+
+    // Select an item to show details
+    private void SelectItem(InventoryItem item)
+    {
+        selectedItem = item;
+        StateHasChanged();
+    }
+
+     static int GetSHA256ChecksumAsInt(string input)
+    {
+        using (SHA256 sha256 = SHA256.Create())
+        {
+            byte[] inputBytes = Encoding.ASCII.GetBytes(input);
+            byte[] hashBytes = sha256.ComputeHash(inputBytes);
+            int checksum = BitConverter.ToInt32(hashBytes, 0);
+            return checksum;
+        }
+    }
+
+    // Inventory item model
+    public class InventoryItem : IEquatable<InventoryItem> , IComparable<InventoryItem>
+    {
+        public string Name { get; set; }
+        public string Type { get; set; }
+        public string ExtraFlags { get; set; }
+        public int Weight { get; set; }
+        public int Value { get; set; }
+        public int Level { get; set; }
+        public string Category { get; set; }
+        public string Location { get; set; }
+        public string Subtype { get; set; }
+        public string DamageFlags { get; set; }
+        public string FullDescription { get; set; } // Store the entire paragraph
+
+         public int CompareTo(InventoryItem? comparePart)
+            {
+                // A null value means that this object is greater.
+                if (comparePart == null)
+                    return 1;
+
+                else
+                    return this.Level.CompareTo(comparePart.Level);
+            }
+
+         public override bool Equals(object? obj)
+            {
+                if (obj == null) return false;
+                InventoryItem? objAsPart = obj as InventoryItem;
+                if (objAsPart == null) return false;
+                else return Equals(objAsPart);
+            }
+
+            public bool Equals(InventoryItem? other)
+                {
+                    if (other == null) return false;
+                    return (this.Name.Equals(other.Name) && this.Level.Equals(other.Level));
+                }
+
+        public override int GetHashCode()
+        {
+            return GetSHA256ChecksumAsInt($"{Name}{Level}");
+        }
+    }
+}
